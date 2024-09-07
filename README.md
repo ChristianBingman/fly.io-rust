@@ -2,7 +2,7 @@ Fly.io Dist-Sys Challenges in Rust
 
 # Completion list
 
-- [ ] Echo
+- [x] Echo
 - [ ] Unique ID Generation
 - [ ] Broadcast
 - [ ] Grow-Only Counter

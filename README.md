@@ -4,7 +4,9 @@ Fly.io Dist-Sys Challenges in Rust
 
 - [x] Echo
 - [x] Unique ID Generation
-- [ ] Broadcast
+- [-] Broadcast
+  - [x] Part A - Breadcast and Topology
+  - [ ] Part B - Multi-Node Broadcast
 - [ ] Grow-Only Counter
 - [ ] Kafka-Style Log
 - [ ] Totally Available...

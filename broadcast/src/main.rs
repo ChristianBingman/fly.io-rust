@@ -4,15 +4,19 @@ use std::io;
 use std::io::Write;
 
 mod node {
+    use rand::Rng;
     use serde::{Deserialize, Serialize};
     use std::collections::{HashMap, HashSet};
+    use std::time::Instant;
 
     pub struct Node {
         initialized: bool,
         id: String,
         cur_id: u64,
         broadcast_messages: HashSet<usize>,
-        peers: Vec<String>,
+        peers: Vec<String>, // List of direct neighbors
+        nodes: Vec<String>, // List of all nodes
+        last_gossip: Instant,
     }
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -86,6 +90,8 @@ mod node {
                 cur_id: 0,
                 broadcast_messages: HashSet::new(),
                 peers: Vec::new(),
+                nodes: Vec::new(),
+                last_gossip: Instant::now(),
             }
         }
 
@@ -97,11 +103,16 @@ mod node {
                 };
             }
             let mut messages = Vec::new();
-            if let Body::Broadcast { msg_id: _, message } = &message.body {
-                if self.broadcast_messages.get(&message).is_none() {
+            if let Body::Broadcast {
+                msg_id: _,
+                message: msg,
+            } = &message.body
+            {
+                if self.broadcast_messages.get(&msg).is_none() && !self.peers.contains(&message.src)
+                {
                     log::debug!(
                         "Unable to find {}, broadcasting to peers {:#?}",
-                        &message,
+                        &msg,
                         self.peers
                     );
                     // rebroadcast
@@ -111,7 +122,7 @@ mod node {
                             dest: node.to_string(),
                             body: Body::Broadcast {
                                 msg_id: self.cur_id,
-                                message: message.clone(),
+                                message: msg.clone(),
                             },
                         });
                         self.cur_id += 1;
@@ -130,7 +141,32 @@ mod node {
             if let Body::BroadcastOk { .. } = &message.body {
                 return vec![];
             }
+            if self.last_gossip.elapsed().as_millis() > 50 && self.nodes.len() != 0 {
+                let mut chosen_nodes = HashSet::new();
+                for _ in 0..2 {
+                    let node = rand::thread_rng().gen_range(0..self.nodes.len());
+                    chosen_nodes.insert(node);
+                }
+                for node in chosen_nodes {
+                    messages.push(Message {
+                        src: self.id.clone(),
+                        dest: self.nodes[node].clone(),
+                        body: Body::Read {
+                            msg_id: self.cur_id,
+                        },
+                    });
+                    self.cur_id += 1;
+                }
+                self.last_gossip = Instant::now();
+            }
             let resp_body = self.handle_body(&message.body);
+
+            // Ignore responding to a broadcast if it was received from another node
+            if self.nodes.contains(&message.src) {
+                if let Body::Broadcast { msg_id, message } = &message.body {
+                    return messages;
+                }
+            }
 
             messages.insert(
                 0,
@@ -165,6 +201,7 @@ mod node {
                         panic!("Node already initialized, but received another initialization message!");
                     }
                     self.id = node_id.clone();
+                    self.nodes = node_ids.clone();
                     self.initialized = true;
                     Body::InitOk {
                         msg_id: self.cur_id,

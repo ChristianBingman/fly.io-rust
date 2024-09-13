@@ -80,6 +80,10 @@ mod node {
             msg_id: u64,
             in_reply_to: u64,
         },
+        Gossip {
+            msg_id: u64,
+            messages: Vec<usize>,
+        },
     }
 
     impl Node {
@@ -129,21 +133,12 @@ mod node {
                     }
                 }
             }
-            if let Body::ReadOk {
-                msg_id: _,
-                in_reply_to: _,
-                messages,
-            } = &message.body
-            {
-                self.broadcast_messages.extend(messages.iter().cloned());
-                return vec![];
-            }
             if let Body::BroadcastOk { .. } = &message.body {
                 return vec![];
             }
             if self.last_gossip.elapsed().as_millis() > 50 && self.nodes.len() != 0 {
                 let mut chosen_nodes = HashSet::new();
-                for _ in 0..2 {
+                for _ in 0..3 {
                     let node = rand::thread_rng().gen_range(0..self.nodes.len());
                     chosen_nodes.insert(node);
                 }
@@ -151,8 +146,9 @@ mod node {
                     messages.push(Message {
                         src: self.id.clone(),
                         dest: self.nodes[node].clone(),
-                        body: Body::Read {
+                        body: Body::Gossip {
                             msg_id: self.cur_id,
+                            messages: self.broadcast_messages.iter().cloned().collect(),
                         },
                     });
                     self.cur_id += 1;
@@ -163,9 +159,7 @@ mod node {
 
             // Ignore responding to a broadcast if it was received from another node
             if self.nodes.contains(&message.src) {
-                if let Body::Broadcast { msg_id, message } = &message.body {
-                    return messages;
-                }
+                return messages;
             }
 
             messages.insert(
@@ -239,6 +233,15 @@ mod node {
                         msg_id: self.cur_id,
                         in_reply_to: msg_id.clone(),
                     }
+                }
+                Body::Gossip { msg_id, messages } => {
+                    log::debug!("Received gossip, updating local list");
+                    self.broadcast_messages.extend(messages);
+                    return Body::EchoOk {
+                        msg_id: self.cur_id,
+                        in_reply_to: msg_id.clone(),
+                        echo: "Nothing".to_string(),
+                    };
                 }
                 _ => unimplemented!(),
             }

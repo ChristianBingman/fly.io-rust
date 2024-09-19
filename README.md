@@ -10,6 +10,6 @@ Fly.io Dist-Sys Challenges in Rust
   - [x] Part C - Fault Tolerant Broadcast
   - [x] Part D - Efficient Broadcast, Part 1
   - [x] Part E - Efficient Broadcast, Part 2
-- [ ] Grow-Only Counter
+- [x] Grow-Only Counter
 - [ ] Kafka-Style Log
 - [ ] Totally Available...

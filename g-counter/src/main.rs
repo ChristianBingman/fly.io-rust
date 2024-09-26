@@ -2,18 +2,17 @@ use serde::Deserialize;
 use std::error::Error;
 use std::io;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 mod node {
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
-    use std::time::Instant;
 
     pub struct Node {
         initialized: bool,
         id: String,
         cur_id: u64,
         nodes: HashMap<String, u64>, // List of all nodes
-        last_gossip: Instant,
     }
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -66,8 +65,28 @@ mod node {
                 id: String::default(),
                 cur_id: 1,
                 nodes: HashMap::new(),
-                last_gossip: Instant::now(),
             }
+        }
+
+        pub fn gossip(&mut self) -> Vec<Message> {
+            let mut messages = Vec::new();
+            if self.nodes.len() != 0 {
+                for (node, value) in self.nodes.iter() {
+                    for cnode in self.nodes.keys() {
+                        messages.push(Message {
+                            src: self.id.clone(),
+                            dest: cnode.clone(),
+                            body: Body::Gossip {
+                                msg_id: self.cur_id,
+                                value: *value,
+                                node: node.clone(),
+                            },
+                        });
+                        self.cur_id += 1;
+                    }
+                }
+            }
+            messages
         }
 
         pub fn handle_message(&mut self, message: Message) -> Vec<Message> {
@@ -85,24 +104,6 @@ mod node {
                     body,
                 });
                 self.cur_id += 1;
-            }
-
-            if self.last_gossip.elapsed().as_millis() > 10 && self.nodes.len() != 0 {
-                for (node, value) in self.nodes.iter() {
-                    for cnode in self.nodes.keys() {
-                        messages.push(Message {
-                            src: self.id.clone(),
-                            dest: cnode.clone(),
-                            body: Body::Gossip {
-                                msg_id: self.cur_id,
-                                value: *value,
-                                node: node.clone(),
-                            },
-                        });
-                        self.cur_id += 1;
-                    }
-                }
-                self.last_gossip = Instant::now();
             }
 
             messages
@@ -167,21 +168,47 @@ mod node {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new().env().init()?;
     let stdin = io::stdin().lock();
-    let mut stdout = io::stdout().lock();
-    let mut node = node::Node::new();
+    let node = Arc::new(Mutex::new(node::Node::new()));
 
     let mut reader = serde_json::Deserializer::from_reader(stdin);
+
+    {
+        let node = Arc::clone(&node);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let mut node = node.lock().unwrap();
+                let messages = node.gossip();
+                for message in messages {
+                    let mut stdout = io::stdout().lock();
+                    serde_json::to_writer(&mut stdout, &message).unwrap();
+                    stdout.write_all(b"\n").unwrap();
+                }
+            }
+        });
+    }
+
     loop {
         match node::Message::deserialize(&mut reader) {
             Ok(m) => {
-                let messages = node.handle_message(m);
-                for message in messages {
-                    serde_json::to_writer(&mut stdout, &message)?;
-                    stdout.write_all(b"\n")?;
-                }
+                let node = Arc::clone(&node);
+                tokio::spawn(async move {
+                    let messages;
+                    {
+                        let mut node = node.lock().unwrap();
+                        messages = node.handle_message(m);
+                    }
+                    for message in messages {
+                        let mut stdout = io::stdout().lock();
+                        serde_json::to_writer(&mut stdout, &message).unwrap();
+                        stdout.write_all(b"\n").unwrap();
+                    }
+                });
             }
             Err(e) => {
                 log::error!("Unable to parse: {}", e);

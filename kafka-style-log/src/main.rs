@@ -48,7 +48,7 @@ mod node {
         },
         Poll {
             msg_id: u64,
-            offsets: Vec<(String, u64)>,
+            offsets: HashMap<String, u64>,
         },
         PollOk {
             msg_id: u64,
@@ -146,6 +146,49 @@ mod node {
                         msg_id: self.cur_id,
                         in_reply_to: msg_id.clone(),
                         offset,
+                    }
+                }
+                Body::Poll { msg_id, offsets } => {
+                    let mut msgs = HashMap::new();
+                    for (key, val) in offsets.iter() {
+                        msgs.insert(
+                            key.clone(),
+                            vec![(
+                                val.clone(),
+                                self.logs
+                                    .get(key)
+                                    .unwrap()
+                                    .1
+                                    .get(val.clone() as usize)
+                                    .unwrap()
+                                    .clone(),
+                            )],
+                        );
+                    }
+                    Body::PollOk {
+                        msg_id: self.cur_id,
+                        in_reply_to: msg_id.clone(),
+                        msgs,
+                    }
+                }
+                Body::CommitOffsets { msg_id, offsets } => {
+                    for (key, val) in offsets.iter() {
+                        self.logs.get_mut(key).unwrap().0 = *val + 1;
+                    }
+                    Body::CommitOffsetsOk {
+                        msg_id: self.cur_id,
+                        in_reply_to: msg_id.clone(),
+                    }
+                }
+                Body::ListCommittedOffsets { msg_id, keys } => {
+                    let mut offsets = HashMap::new();
+                    for key in keys {
+                        offsets.insert(key.clone(), self.logs.get(key).unwrap().0);
+                    }
+                    Body::ListCommittedOffsetsOk {
+                        msg_id: self.cur_id,
+                        in_reply_to: msg_id.clone(),
+                        offsets,
                     }
                 }
                 _ => unimplemented!(),

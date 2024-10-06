@@ -151,19 +151,13 @@ mod node {
                 Body::Poll { msg_id, offsets } => {
                     let mut msgs = HashMap::new();
                     for (key, val) in offsets.iter() {
-                        msgs.insert(
-                            key.clone(),
-                            vec![(
-                                val.clone(),
-                                self.logs
-                                    .get(key)
-                                    .unwrap()
-                                    .1
-                                    .get(val.clone() as usize)
-                                    .unwrap()
-                                    .clone(),
-                            )],
-                        );
+                        if let Some(log) = self.logs.get(key) {
+                            if let Some(entry) = log.1.get(val.clone() as usize) {
+                                msgs.insert(key.clone(), vec![(val.clone(), entry.clone())]);
+                            } else {
+                                msgs.insert(key.clone(), vec![]);
+                            }
+                        }
                     }
                     Body::PollOk {
                         msg_id: self.cur_id,
@@ -183,7 +177,9 @@ mod node {
                 Body::ListCommittedOffsets { msg_id, keys } => {
                     let mut offsets = HashMap::new();
                     for key in keys {
-                        offsets.insert(key.clone(), self.logs.get(key).unwrap().0);
+                        if let Some(val) = self.logs.get(key) {
+                            offsets.insert(key.clone(), val.0);
+                        }
                     }
                     Body::ListCommittedOffsetsOk {
                         msg_id: self.cur_id,
@@ -213,9 +209,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let messages;
                     {
                         let mut node = node.lock().unwrap();
+                        log::error!("{:#?}", m);
                         messages = node.handle_message(m);
                     }
                     for message in messages {
+                        log::error!("{:#?}", message);
                         let mut stdout = io::stdout().lock();
                         serde_json::to_writer(&mut stdout, &message).unwrap();
                         stdout.write_all(b"\n").unwrap();
